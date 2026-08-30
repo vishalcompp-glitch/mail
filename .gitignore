@@ -1,0 +1,7 @@
+mail_env/
+__pycache__/
+*.py[cod]
+.env
+db.sqlite3
+.vscode/
+.idea/
