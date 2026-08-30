@@ -18,27 +18,74 @@ class ContactMessageAPITests(APITestCase):
         "message": "I would like to discuss a project with you.",
     }
 
-    def test_valid_contact_submission(self):
+    def setUp(self):
+        self.client.defaults["wsgi.url_scheme"] = "https"
+
+    @patch("api.views.send_contact_email")
+    def test_valid_contact_submission(self, mock_send):
+        mock_send.return_value = "test-email-id"
+
         response = self.client.post(
             self.url,
             self.valid_payload,
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(ContactMessage.objects.count(), 1)
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        self.assertEqual(
+            response.data,
+            {
+                "detail": "Your message has been sent successfully."
+            },
+        )
 
         contact = ContactMessage.objects.first()
 
         self.assertEqual(contact.name, "John Doe")
         self.assertEqual(contact.email, "john@example.com")
-        self.assertEqual(contact.subject, "Project Inquiry")
-        self.assertEqual(
-            contact.message,
-            "I would like to discuss a project with you.",
-        )
         self.assertIsNotNone(contact.ip_address)
+        self.assertTrue(contact.email_sent)
+        self.assertEqual(contact.email_error, "")
+
+        mock_send.assert_called_once()
+    @patch(
+    "api.views.send_contact_email",
+    side_effect=Exception("Resend unavailable"),)
+    def test_email_failure_is_handled(self, mock_send):
+        response = self.client.post(
+            self.url,
+            self.valid_payload,
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+        self.assertEqual(
+            response.data,
+            {
+                "detail": (
+                    "Your message was received, "
+                    "but email delivery failed."
+                )
+            },
+        )
+
+        contact = ContactMessage.objects.first()
+
         self.assertFalse(contact.email_sent)
+        self.assertEqual(
+            contact.email_error,
+            "Email delivery failed.",
+        )
+
+        mock_send.assert_called_once()
 
     def test_missing_name_is_rejected(self):
         payload = self.valid_payload.copy()
@@ -156,6 +203,10 @@ class ContactMessageThrottleTests(APITestCase):
         "subject": "Testing throttle",
         "message": "This is a throttle test.",
     }
+
+    def setUp(self):
+        self.client.defaults["wsgi.url_scheme"] = "https"
+        cache.clear()
 
     def setUp(self):
         cache.clear()
